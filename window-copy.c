@@ -678,7 +678,7 @@ window_copy_key(struct window_pane *wp, struct client *c, struct session *sess,
 		if (sess != NULL &&
 		    (cmd == MODEKEYCOPY_COPYLINE ||
 		    cmd == MODEKEYCOPY_COPYENDOFLINE)) {
-			window_copy_copy_selection(wp, NULL);
+			window_copy_copy_pipe(wp, sess, NULL, arg);
 			window_pane_reset_mode(wp);
 			return;
 		}

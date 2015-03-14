@@ -130,6 +130,8 @@ cmd_bind_key_mode_table(struct cmd *self, struct cmd_q *cmdq, key_code key)
 		}
 		break;
 	case MODEKEYCOPY_COPYPIPE:
+	case MODEKEYCOPY_COPYLINE:
+	case MODEKEYCOPY_COPYENDOFLINE:
 		if (args->argc != 3) {
 			cmdq_error(cmdq, "no argument given");
 			return (CMD_RETURN_ERROR);
