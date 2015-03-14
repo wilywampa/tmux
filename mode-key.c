@@ -116,6 +116,8 @@ const struct mode_key_cmdstr mode_key_cmdstr_choice[] = {
 const struct mode_key_cmdstr mode_key_cmdstr_copy[] = {
 	{ MODEKEYCOPY_APPENDSELECTION, "append-selection" },
 	{ MODEKEYCOPY_BACKTOINDENTATION, "back-to-indentation" },
+	{ MODEKEYCOPY_UPTOINDENTATION, "up-to-indentation" },
+	{ MODEKEYCOPY_DOWNTOINDENTATION, "down-to-indentation" },
 	{ MODEKEYCOPY_BOTTOMLINE, "bottom-line" },
 	{ MODEKEYCOPY_CANCEL, "cancel" },
 	{ MODEKEYCOPY_CLEARSELECTION, "clear-selection" },
@@ -322,6 +324,8 @@ const struct mode_key_entry mode_key_vi_copy[] = {
 	{ '\n',			    0, MODEKEYCOPY_COPYSELECTION },
 	{ '\r',			    0, MODEKEYCOPY_COPYSELECTION },
 	{ '^',			    0, MODEKEYCOPY_BACKTOINDENTATION },
+	{ '_',			    0, MODEKEYCOPY_UPTOINDENTATION },
+	{ '+',			    0, MODEKEYCOPY_DOWNTOINDENTATION },
 	{ 'b',			    0, MODEKEYCOPY_PREVIOUSWORD },
 	{ 'e',			    0, MODEKEYCOPY_NEXTWORDEND },
 	{ 'f',			    0, MODEKEYCOPY_JUMP },

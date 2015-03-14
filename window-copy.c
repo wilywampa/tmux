@@ -574,9 +574,19 @@ window_copy_key(struct window_pane *wp, struct client *c, struct session *sess,
 		for (; np != 0; np--)
 			window_copy_cursor_right(wp);
 		break;
+	case MODEKEYCOPY_UPTOINDENTATION:
+		for (; np != 0; np--)
+			window_copy_cursor_up(wp, 0);
+		window_copy_cursor_back_to_indentation(wp);
+		break;
 	case MODEKEYCOPY_UP:
 		for (; np != 0; np--)
 			window_copy_cursor_up(wp, 0);
+		break;
+	case MODEKEYCOPY_DOWNTOINDENTATION:
+		for (; np != 0; np--)
+			window_copy_cursor_down(wp, 0);
+		window_copy_cursor_back_to_indentation(wp);
 		break;
 	case MODEKEYCOPY_DOWN:
 		for (; np != 0; np--)
