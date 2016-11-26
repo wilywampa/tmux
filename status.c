@@ -860,6 +860,8 @@ status_prompt_translate_key(struct client *c, key_code key, key_code *new_key)
 		case '\003': /* C-c */
 		case '\010': /* C-h */
 		case '\011': /* Tab */
+		case '\016': /* C-n */
+		case '\020': /* C-p */
 		case '\025': /* C-u */
 		case '\027': /* C-w */
 		case '\n':
@@ -945,6 +947,7 @@ status_prompt_translate_key(struct client *c, key_code key, key_code *new_key)
 		return (1);
 	case KEYC_DOWN:
 	case 'j':
+	case '\016': /* C-n */
 		*new_key = KEYC_DOWN;
 		return (1);
 	case KEYC_LEFT:
@@ -958,6 +961,7 @@ status_prompt_translate_key(struct client *c, key_code key, key_code *new_key)
 		return (1);
 	case KEYC_UP:
 	case 'k':
+	case '\020': /* C-p */
 		*new_key = KEYC_UP;
 		return (1);
 	case '\010' /* C-h */:
