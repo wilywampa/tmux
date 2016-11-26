@@ -526,31 +526,6 @@ window_copy_command(struct window_pane *wp, struct client *c, struct session *s,
 			window_copy_clear_selection(wp);
 			window_copy_redraw_screen(wp);
 		}
-		if (strcmp(command, "copy-end-of-line") == 0) {
-			window_copy_start_selection(wp);
-			for (; np > 1; np--)
-				window_copy_cursor_down(wp, 0);
-			window_copy_cursor_end_of_line(wp);
-			window_copy_redraw_screen(wp);
-
-			if (s != NULL) {
-				window_copy_copy_selection(wp, NULL);
-				window_pane_reset_mode(wp);
-			}
-		}
-		if (strcmp(command, "copy-line") == 0) {
-			window_copy_cursor_start_of_line(wp);
-			window_copy_start_selection(wp);
-			for (; np > 1; np--)
-				window_copy_cursor_down(wp, 0);
-			window_copy_cursor_end_of_line(wp);
-			window_copy_redraw_screen(wp);
-
-			if (s != NULL) {
-				window_copy_copy_selection(wp, NULL);
-				window_pane_reset_mode(wp);
-			}
-		}
 		if (strcmp(command, "copy-selection") == 0) {
 			if (s != NULL)
 				window_copy_copy_selection(wp, NULL);
@@ -770,6 +745,31 @@ window_copy_command(struct window_pane *wp, struct client *c, struct session *s,
 		}
 	} else if (args->argc == 2 && *args->argv[1] != '\0') {
 		argument = args->argv[1];
+		if (strcmp(command, "copy-end-of-line") == 0) {
+			window_copy_start_selection(wp);
+			for (; np > 1; np--)
+				window_copy_cursor_down(wp, 0);
+			window_copy_cursor_end_of_line(wp);
+			window_copy_redraw_screen(wp);
+
+			if (s != NULL) {
+				window_copy_copy_pipe(wp, s, NULL, argument);
+				window_pane_reset_mode(wp);
+			}
+		}
+		if (strcmp(command, "copy-line") == 0) {
+			window_copy_cursor_start_of_line(wp);
+			window_copy_start_selection(wp);
+			for (; np > 1; np--)
+				window_copy_cursor_down(wp, 0);
+			window_copy_cursor_end_of_line(wp);
+			window_copy_redraw_screen(wp);
+
+			if (s != NULL) {
+				window_copy_copy_pipe(wp, s, NULL, argument);
+				window_pane_reset_mode(wp);
+			}
+		}
 		if (strcmp(command, "copy-pipe") == 0) {
 			if (s != NULL)
 				window_copy_copy_pipe(wp, s, NULL, argument);
