@@ -580,6 +580,11 @@ window_copy_command(struct window_pane *wp, struct client *c, struct session *s,
 			for (; np != 0; np--)
 				window_copy_cursor_up(wp, 0);
 		}
+		if (strcmp(command, "down-to-indentation") == 0) {
+			for (; np != 0; np--)
+				window_copy_cursor_down(wp, 0);
+			window_copy_cursor_back_to_indentation(wp);
+		}
 		if (strcmp(command, "end-of-line") == 0)
 			window_copy_cursor_end_of_line(wp);
 		if (strcmp(command, "halfpage-down") == 0) {
@@ -757,6 +762,11 @@ window_copy_command(struct window_pane *wp, struct client *c, struct session *s,
 			data->cy = 0;
 			window_copy_update_selection(wp, 1);
 			window_copy_redraw_screen(wp);
+		}
+		if (strcmp(command, "up-to-indentation") == 0) {
+			for (; np != 0; np--)
+				window_copy_cursor_up(wp, 0);
+			window_copy_cursor_back_to_indentation(wp);
 		}
 	} else if (args->argc == 2 && *args->argv[1] != '\0') {
 		argument = args->argv[1];
