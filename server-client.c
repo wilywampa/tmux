@@ -473,7 +473,7 @@ have_event:
 		break;
 	case DRAG:
 		if (c->tty.mouse_drag_update != NULL)
-			c->tty.mouse_drag_update(c, m);
+			key = KEYC_DRAGGING;
 		else {
 			switch (MOUSE_BUTTONS(b)) {
 			case 0:
@@ -690,15 +690,12 @@ server_client_handle_key(struct client *c, key_code key)
 	struct key_table	*table;
 	struct key_binding	 bd_find, *bd;
 	int			 xtimeout;
+	struct cmd_find_state	 fs;
 
 	/* Check the client is good to accept input. */
 	if (s == NULL || (c->flags & (CLIENT_DEAD|CLIENT_SUSPENDED)) != 0)
 		return;
 	w = s->curw->window;
-	if (KEYC_IS_MOUSE(key))
-		wp = cmd_mouse_pane(m, NULL, NULL);
-	else
-		wp = w->active;
 
 	/* Update the activity timer. */
 	if (gettimeofday(&c->activity_time, NULL) != 0)
@@ -730,6 +727,7 @@ server_client_handle_key(struct client *c, key_code key)
 	}
 
 	/* Check for mouse keys. */
+	m->valid = 0;
 	if (key == KEYC_MOUSE) {
 		if (c->flags & CLIENT_READONLY)
 			return;
@@ -740,10 +738,26 @@ server_client_handle_key(struct client *c, key_code key)
 		m->valid = 1;
 		m->key = key;
 
-		if (!options_get_number(s->options, "mouse"))
-			goto forward;
+		/*
+		 * Mouse drag is in progress, so fire the callback (now that
+		 * the mouse event is valid).
+		 */
+		if (key == KEYC_DRAGGING) {
+			c->tty.mouse_drag_update(c, m);
+			return;
+		}
 	} else
 		m->valid = 0;
+
+	/* Find affected pane. */
+	if (KEYC_IS_MOUSE(key) && m->valid)
+		wp = cmd_mouse_pane(m, NULL, NULL);
+	else
+		wp = w->active;
+
+	/* Forward mouse keys if disabled. */
+	if (key == KEYC_MOUSE && !options_get_number(s->options, "mouse"))
+		goto forward;
 
 	/* Treat everything as a regular key when pasting is detected. */
 	if (!KEYC_IS_MOUSE(key) && server_client_assume_paste(s))
@@ -761,6 +775,10 @@ retry:
 		table = c->keytable;
 	else
 		table = key_bindings_get_table(name, 1);
+	if (wp == NULL)
+		log_debug("key table %s (no pane)", table->name);
+	else
+		log_debug("key table %s (pane %%%u)", table->name, wp->id);
 
 	/* Try to see if there is a key binding in the current table. */
 	bd_find.key = key;
@@ -802,8 +820,21 @@ retry:
 		}
 		server_status_client(c);
 
+		/* Find default state if the pane is known. */
+		cmd_find_clear_state(&fs, NULL, 0);
+		if (wp != NULL) {
+			fs.s = s;
+			fs.wl = fs.s->curw;
+			fs.w = fs.wl->window;
+			fs.wp = wp;
+			cmd_find_log_state(__func__, &fs);
+
+			if (!cmd_find_valid_state(&fs))
+				fatalx("invalid key state");
+		}
+
 		/* Dispatch the key binding. */
-		key_bindings_dispatch(bd, c, m);
+		key_bindings_dispatch(bd, c, m, &fs);
 		key_bindings_unref_table(table);
 		return;
 	}

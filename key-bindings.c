@@ -258,12 +258,13 @@ key_bindings_init(void)
 		"bind -Tcopy-mode n send -X search-again",
 		"bind -Tcopy-mode q send -X cancel",
 		"bind -Tcopy-mode t command-prompt -1p'jump to forward' \"send -X jump-to-forward \\\"%%%\\\"\"",
-		"bind -Tcopy-mode MouseDrag1Pane send -X begin-selection",
+		"bind -Tcopy-mode MouseDown1Pane select-pane",
+		"bind -Tcopy-mode MouseDrag1Pane select-pane\\; send -X begin-selection",
 		"bind -Tcopy-mode MouseDragEnd1Pane send -X copy-selection-and-cancel",
-		"bind -Tcopy-mode WheelUpPane send -N5 -X scroll-up",
-		"bind -Tcopy-mode WheelDownPane send -N5 -X scroll-down",
-		"bind -Tcopy-mode DoubleClick1Pane send -X select-word",
-		"bind -Tcopy-mode TripleClick1Pane send -X select-line",
+		"bind -Tcopy-mode WheelUpPane select-pane\\; send -N5 -X scroll-up",
+		"bind -Tcopy-mode WheelDownPane select-pane\\; send -N5 -X scroll-down",
+		"bind -Tcopy-mode DoubleClick1Pane select-pane\\; send -X select-word",
+		"bind -Tcopy-mode TripleClick1Pane select-pane\\; send -X select-line",
 		"bind -Tcopy-mode NPage send -X page-down",
 		"bind -Tcopy-mode PPage send -X page-up",
 		"bind -Tcopy-mode Up send -X cursor-up",
@@ -357,12 +358,13 @@ key_bindings_init(void)
 		"bind -Tcopy-mode-vi w send -X next-word",
 		"bind -Tcopy-mode-vi { send -X previous-paragraph",
 		"bind -Tcopy-mode-vi } send -X next-paragraph",
-		"bind -Tcopy-mode-vi MouseDrag1Pane send -X begin-selection",
+		"bind -Tcopy-mode-vi MouseDown1Pane select-pane",
+		"bind -Tcopy-mode-vi MouseDrag1Pane select-pane\\; send -X begin-selection",
 		"bind -Tcopy-mode-vi MouseDragEnd1Pane send -X copy-selection-and-cancel",
-		"bind -Tcopy-mode-vi WheelUpPane send -N5 -X scroll-up",
-		"bind -Tcopy-mode-vi WheelDownPane send -N5 -X scroll-down",
-		"bind -Tcopy-mode-vi DoubleClick1Pane send -X select-word",
-		"bind -Tcopy-mode-vi TripleClick1Pane send -X select-line",
+		"bind -Tcopy-mode-vi WheelUpPane select-pane\\; send -N5 -X scroll-up",
+		"bind -Tcopy-mode-vi WheelDownPane select-pane\\; send -N5 -X scroll-down",
+		"bind -Tcopy-mode-vi DoubleClick1Pane select-pane\\; send -X select-word",
+		"bind -Tcopy-mode-vi TripleClick1Pane select-pane\\; send -X select-line",
 		"bind -Tcopy-mode-vi BSpace send -X cursor-left",
 		"bind -Tcopy-mode-vi NPage send -X page-down",
 		"bind -Tcopy-mode-vi PPage send -X page-up",
@@ -397,7 +399,7 @@ key_bindings_read_only(struct cmdq_item *item, __unused void *data)
 
 void
 key_bindings_dispatch(struct key_binding *bd, struct client *c,
-    struct mouse_event *m)
+    struct mouse_event *m, struct cmd_find_state *fs)
 {
 	struct cmd	*cmd;
 	int		 readonly;
@@ -410,5 +412,5 @@ key_bindings_dispatch(struct key_binding *bd, struct client *c,
 	if (!readonly && (c->flags & CLIENT_READONLY))
 		cmdq_append(c, cmdq_get_callback(key_bindings_read_only, NULL));
 	else
-		cmdq_append(c, cmdq_get_command(bd->cmdlist, NULL, m, 0));
+		cmdq_append(c, cmdq_get_command(bd->cmdlist, fs, m, 0));
 }
