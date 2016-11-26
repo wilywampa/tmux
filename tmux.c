@@ -43,24 +43,23 @@ struct hooks	*global_hooks;
 struct timeval	 start_time;
 const char	*socket_path;
 
-__dead void	 usage(void);
-static char	*make_label(const char *);
+static __dead void	 usage(void);
+static char		*make_label(const char *);
 
-#ifndef HAVE___PROGNAME
-char      *__progname = (char *) "tmux";
-#endif
+static const char	*getshell(void);
+static int		 checkshell(const char *);
 
-__dead void
+static __dead void
 usage(void)
 {
 	fprintf(stderr,
 	    "usage: %s [-2CluvV] [-c shell-command] [-f file] [-L socket-name]\n"
 	    "            [-S socket-path] [command [flags]]\n",
-	    __progname);
+	    getprogname());
 	exit(1);
 }
 
-const char *
+static const char *
 getshell(void)
 {
 	struct passwd	*pw;
@@ -77,7 +76,7 @@ getshell(void)
 	return (_PATH_BSHELL);
 }
 
-int
+static int
 checkshell(const char *shell)
 {
 	if (shell == NULL || *shell == '\0' || *shell != '/')
@@ -98,7 +97,7 @@ areshell(const char *shell)
 		ptr++;
 	else
 		ptr = shell;
-	progname = __progname;
+	progname = getprogname();
 	if (*progname == '-')
 		progname++;
 	if (strcmp(ptr, progname) == 0)
@@ -225,7 +224,7 @@ main(int argc, char **argv)
 				flags |= CLIENT_CONTROL;
 			break;
 		case 'V':
-			printf("%s %s\n", __progname, VERSION);
+			printf("%s %s\n", getprogname(), VERSION);
 			exit(0);
 		case 'f':
 			set_cfg_file(optarg);

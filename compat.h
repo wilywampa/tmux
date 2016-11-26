@@ -35,6 +35,14 @@
 #define ECHOPRT 0
 #endif
 
+#ifndef ACCESSPERMS
+#define ACCESSPERMS (S_IRWXU|S_IRWXG|S_IRWXO)
+#endif
+
+#if !defined(FIONREAD) && defined(__sun)
+#include <sys/filio.h>
+#endif
+
 #ifndef HAVE_BSD_TYPES
 typedef uint8_t u_int8_t;
 typedef uint16_t u_int16_t;
@@ -223,6 +231,16 @@ size_t	 	 strlcat(char *, const char *, size_t);
 int	 	 daemon(int, int);
 #endif
 
+#ifndef HAVE_GETPROGNAME
+/* getprogname.c */
+const char	*getprogname(void);
+#endif
+
+#ifndef HAVE_SETPROCTITLE
+/* setproctitle.c */
+void		 setproctitle(const char *, ...);
+#endif
+
 #ifndef HAVE_B64_NTOP
 /* b64_ntop.c */
 #undef b64_ntop /* for Cygwin */
@@ -261,15 +279,16 @@ int		 unsetenv(const char *);
 void		 cfmakeraw(struct termios *);
 #endif
 
-#ifndef HAVE_OPENAT
-/* openat.c */
-#define AT_FDCWD -100
-int		 openat(int, const char *, int, ...);
-#endif
-
 #ifndef HAVE_REALLOCARRAY
 /* reallocarray.c */
-void		*reallocarray(void *, size_t, size_t size);
+void		*reallocarray(void *, size_t, size_t);
+#endif
+
+#ifdef HAVE_UTF8PROC
+/* utf8proc.c */
+int		 utf8proc_wcwidth(wchar_t);
+int		 utf8proc_mbtowc(wchar_t *, const char *, size_t);
+int		 utf8proc_wctomb(char *, wchar_t);
 #endif
 
 #ifdef HAVE_GETOPT

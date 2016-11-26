@@ -1,7 +1,5 @@
-/* $OpenBSD$ */
-
 /*
- * Copyright (c) 2009 Nicholas Marriott <nicholas.marriott@gmail.com>
+ * Copyright (c) 2016 Nicholas Marriott <nicholas.marriott@gmail.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -20,37 +18,26 @@
 
 #include "tmux.h"
 
-/*
- * Clear pane history.
- */
-
-static enum cmd_retval	cmd_clear_history_exec(struct cmd *,
-			    struct cmdq_item *);
-
-const struct cmd_entry cmd_clear_history_entry = {
-	.name = "clear-history",
-	.alias = "clearhist",
-
-	.args = { "t:", 0, 0 },
-	.usage = CMD_TARGET_PANE_USAGE,
-
-	.tflag = CMD_PANE,
-
-	.flags = CMD_AFTERHOOK,
-	.exec = cmd_clear_history_exec
-};
-
-static enum cmd_retval
-cmd_clear_history_exec(__unused struct cmd *self, struct cmdq_item *item)
+#if defined(HAVE_PROGRAM_INVOCATION_SHORT_NAME)
+const char *
+getprogname(void)
 {
-	struct window_pane	*wp = item->state.tflag.wp;
-	struct grid		*gd;
+	extern char	*program_invocation_short_name;
 
-	gd = item->state.tflag.wp->base.grid;
-
-	if (wp->mode == &window_copy_mode)
-		window_pane_reset_mode(wp);
-	grid_clear_history(gd);
-
-	return (CMD_RETURN_NORMAL);
+	return (program_invocation_short_name);
 }
+#elif defined(HAVE___PROGNAME)
+const char *
+getprogname(void)
+{
+	extern char	*__progname;
+
+	return (__progname);
+}
+#else
+const char *
+getprogname(void)
+{
+	return ("tmux");
+}
+#endif

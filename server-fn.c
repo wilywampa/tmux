@@ -26,8 +26,9 @@
 
 #include "tmux.h"
 
-struct session *server_next_session(struct session *);
-void		server_callback_identify(int, short, void *);
+static struct session	*server_next_session(struct session *);
+static void		 server_callback_identify(int, short, void *);
+static void		 server_destroy_session_group(struct session *);
 
 void
 server_fill_environ(struct session *s, struct environ *env)
@@ -255,7 +256,8 @@ server_link_window(struct session *src, struct winlink *srcwl,
 			 * Can't use session_detach as it will destroy session
 			 * if this makes it empty.
 			 */
-			notify_window_unlinked(dst, dstwl->window);
+			notify_session_window("window-unlinked", dst,
+			    dstwl->window);
 			dstwl->flags &= ~WINLINK_ALERTFLAGS;
 			winlink_stack_remove(&dst->lastw, dstwl);
 			winlink_remove(&dst->windows, dstwl);
@@ -291,13 +293,12 @@ server_unlink_window(struct session *s, struct winlink *wl)
 }
 
 void
-server_destroy_pane(struct window_pane *wp, int hooks)
+server_destroy_pane(struct window_pane *wp, int notify)
 {
 	struct window		*w = wp->window;
 	int			 old_fd;
 	struct screen_write_ctx	 ctx;
 	struct grid_cell	 gc;
-	struct cmd_find_state	 fs;
 
 	old_fd = wp->fd;
 	if (wp->fd != -1) {
@@ -312,6 +313,10 @@ server_destroy_pane(struct window_pane *wp, int hooks)
 	if (options_get_number(w->options, "remain-on-exit")) {
 		if (old_fd == -1)
 			return;
+
+		if (notify)
+			notify_pane("pane-died", wp);
+
 		screen_write_start(&ctx, wp, &wp->base);
 		screen_write_scrollregion(&ctx, 0, screen_size_y(ctx.s) - 1);
 		screen_write_cursormove(&ctx, 0, screen_size_y(ctx.s) - 1);
@@ -322,17 +327,15 @@ server_destroy_pane(struct window_pane *wp, int hooks)
 		screen_write_stop(&ctx);
 		wp->flags |= PANE_REDRAW;
 
-		if (hooks && cmd_find_from_pane(&fs, wp) == 0)
-			hooks_run(hooks_get(fs.s), NULL, &fs, "pane-died");
 		return;
 	}
+
+	if (notify)
+		notify_pane("pane-exited", wp);
 
 	server_unzoom_window(w);
 	layout_close_pane(wp);
 	window_remove_pane(w, wp);
-
-	if (hooks && cmd_find_from_window(&fs, w) == 0)
-		hooks_run(hooks_get(fs.s), NULL, &fs, "pane-exited");
 
 	if (TAILQ_EMPTY(&w->panes))
 		server_kill_window(w);
@@ -340,7 +343,7 @@ server_destroy_pane(struct window_pane *wp, int hooks)
 		server_redraw_window(w);
 }
 
-void
+static void
 server_destroy_session_group(struct session *s)
 {
 	struct session_group	*sg;
@@ -356,7 +359,7 @@ server_destroy_session_group(struct session *s)
 	}
 }
 
-struct session *
+static struct session *
 server_next_session(struct session *s)
 {
 	struct session *s_loop, *s_out;
@@ -394,7 +397,7 @@ server_destroy_session(struct session *s)
 			c->session = s_new;
 			server_client_set_key_table(c, NULL);
 			status_timer_start(c);
-			notify_attached_session_changed(c);
+			notify_client("client-session-changed", c);
 			session_update_activity(s_new, NULL);
 			gettimeofday(&s_new->last_attached_time, NULL);
 			server_redraw_client(c);
@@ -442,21 +445,23 @@ server_set_identify(struct client *c)
 }
 
 void
-server_clear_identify(struct client *c)
+server_clear_identify(struct client *c, struct window_pane *wp)
 {
-	if (c->flags & CLIENT_IDENTIFY) {
-		c->flags &= ~CLIENT_IDENTIFY;
-		c->tty.flags &= ~(TTY_FREEZE|TTY_NOCURSOR);
-		server_redraw_client(c);
-	}
+	if (~c->flags & CLIENT_IDENTIFY)
+		return;
+	c->flags &= ~CLIENT_IDENTIFY;
+
+	if (c->identify_callback != NULL)
+		c->identify_callback(c, wp);
+
+	c->tty.flags &= ~(TTY_FREEZE|TTY_NOCURSOR);
+	server_redraw_client(c);
 }
 
-void
+static void
 server_callback_identify(__unused int fd, __unused short events, void *data)
 {
-	struct client	*c = data;
-
-	server_clear_identify(c);
+	server_clear_identify(data, NULL);
 }
 
 /* Set stdin callback. */

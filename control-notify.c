@@ -158,7 +158,7 @@ control_notify_window_renamed(struct window *w)
 }
 
 void
-control_notify_attached_session_changed(struct client *c)
+control_notify_client_session_changed(struct client *c)
 {
 	struct session	*s;
 
@@ -196,7 +196,7 @@ control_notify_session_created(__unused struct session *s)
 }
 
 void
-control_notify_session_close(__unused struct session *s)
+control_notify_session_closed(__unused struct session *s)
 {
 	struct client	*c;
 
