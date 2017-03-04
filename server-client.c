@@ -294,6 +294,33 @@ server_client_detach(struct client *c, enum msgtype msgtype)
 	proc_send_s(c->peer, msgtype, s->name);
 }
 
+/* Execute command to replace a client. */
+void
+server_client_exec(struct client *c, const char *cmd)
+{
+	struct session	*s = c->session;
+	char		*msg;
+	const char	*shell;
+	size_t		 cmdsize, shellsize;
+
+	if (*cmd == '\0')
+		return;
+	cmdsize = strlen(cmd) + 1;
+
+	if (s != NULL)
+		shell = options_get_string(s->options, "default-shell");
+	else
+		shell = options_get_string(global_s_options, "default-shell");
+	shellsize = strlen(shell) + 1;
+
+	msg = xmalloc(cmdsize + shellsize);
+	memcpy(msg, cmd, cmdsize);
+	memcpy(msg + cmdsize, shell, shellsize);
+
+	proc_send(c->peer, MSG_EXEC, -1, msg, cmdsize + shellsize);
+	free(msg);
+}
+
 /* Check for mouse keys. */
 static key_code
 server_client_check_mouse(struct client *c)
@@ -306,14 +333,27 @@ server_client_check_mouse(struct client *c)
 	int			 flag;
 	key_code		 key;
 	struct timeval		 tv;
-	enum { NOTYPE, DOWN, UP, DRAG, WHEEL, DOUBLE, TRIPLE } type = NOTYPE;
-	enum { NOWHERE, PANE, STATUS, BORDER } where = NOWHERE;
+	enum { NOTYPE, MOVE, DOWN, UP, DRAG, WHEEL, DOUBLE, TRIPLE } type;
+	enum { NOWHERE, PANE, STATUS, BORDER } where;
+
+	type = NOTYPE;
+	where = NOWHERE;
 
 	log_debug("mouse %02x at %u,%u (last %u,%u) (%d)", m->b, m->x, m->y,
 	    m->lx, m->ly, c->tty.mouse_drag_flag);
 
 	/* What type of event is this? */
-	if (MOUSE_DRAG(m->b)) {
+	if ((m->sgr_type != ' ' &&
+	    MOUSE_DRAG(m->sgr_b) &&
+	    MOUSE_BUTTONS(m->sgr_b) == 3) ||
+	    (m->sgr_type == ' ' &&
+	    MOUSE_DRAG(m->b) &&
+	    MOUSE_BUTTONS(m->b) == 3 &&
+	    MOUSE_BUTTONS(m->lb) == 3)) {
+		type = MOVE;
+		x = m->x, y = m->y, b = 0;
+		log_debug("move at %u,%u", x, y);
+	} else if (MOUSE_DRAG(m->b)) {
 		type = DRAG;
 		if (c->tty.mouse_drag_flag) {
 			x = m->x, y = m->y, b = m->b;
@@ -470,6 +510,14 @@ have_event:
 	key = KEYC_UNKNOWN;
 	switch (type) {
 	case NOTYPE:
+		break;
+	case MOVE:
+		if (where == PANE)
+			key = KEYC_MOUSEMOVE_PANE;
+		if (where == STATUS)
+			key = KEYC_MOUSEMOVE_STATUS;
+		if (where == BORDER)
+			key = KEYC_MOUSEMOVE_BORDER;
 		break;
 	case DRAG:
 		if (c->tty.mouse_drag_update != NULL)
@@ -756,7 +804,7 @@ server_client_handle_key(struct client *c, key_code key)
 		wp = w->active;
 
 	/* Forward mouse keys if disabled. */
-	if (key == KEYC_MOUSE && !options_get_number(s->options, "mouse"))
+	if (KEYC_IS_MOUSE(key) && !options_get_number(s->options, "mouse"))
 		goto forward;
 
 	/* Treat everything as a regular key when pasting is detected. */
@@ -779,6 +827,18 @@ retry:
 		log_debug("key table %s (no pane)", table->name);
 	else
 		log_debug("key table %s (pane %%%u)", table->name, wp->id);
+
+	/*
+	 * The prefix always takes precedence and forces a switch to the prefix
+	 * table, unless we are already there.
+	 */
+	if ((key == (key_code)options_get_number(s->options, "prefix") ||
+	    key == (key_code)options_get_number(s->options, "prefix2")) &&
+	    strcmp(table->name, "prefix") != 0) {
+		server_client_set_key_table(c, "prefix");
+		server_status_client(c);
+		return;
+	}
 
 	/* Try to see if there is a key binding in the current table. */
 	bd_find.key = key;
@@ -852,18 +912,8 @@ retry:
 
 	/* If no match and we're not in the root table, that's it. */
 	if (name == NULL && !server_client_is_default_key_table(c)) {
+		log_debug("no key in key table %s", table->name);
 		server_client_set_key_table(c, NULL);
-		server_status_client(c);
-		return;
-	}
-
-	/*
-	 * No match, but in the root table. Prefix switches to the prefix table
-	 * and everything else is passed through.
-	 */
-	if (key == (key_code)options_get_number(s->options, "prefix") ||
-	    key == (key_code)options_get_number(s->options, "prefix2")) {
-		server_client_set_key_table(c, "prefix");
 		server_status_client(c);
 		return;
 	}
@@ -911,6 +961,7 @@ server_client_loop(void)
 	}
 }
 
+/* Resize timer event. */
 static void
 server_client_resize_event(__unused int fd, __unused short events, void *data)
 {
@@ -1034,7 +1085,7 @@ static void
 server_client_reset_state(struct client *c)
 {
 	struct window		*w = c->session->curw->window;
-	struct window_pane	*wp = w->active;
+	struct window_pane	*wp = w->active, *loop;
 	struct screen		*s = wp->screen;
 	struct options		*oo = c->session->options;
 	int			 status, mode, o;
@@ -1058,8 +1109,15 @@ server_client_reset_state(struct client *c)
 	 * mode.
 	 */
 	mode = s->mode;
-	if (options_get_number(oo, "mouse"))
-		mode = (mode & ~ALL_MOUSE_MODES) | MODE_MOUSE_BUTTON;
+	if (options_get_number(oo, "mouse")) {
+		mode &= ~ALL_MOUSE_MODES;
+		TAILQ_FOREACH(loop, &w->panes, entry) {
+			if (loop->screen->mode & MODE_MOUSE_ALL)
+				mode |= MODE_MOUSE_ALL;
+		}
+		if (~mode & MODE_MOUSE_ALL)
+			mode |= MODE_MOUSE_BUTTON;
+	}
 
 	/* Set the terminal mode and reset attributes. */
 	tty_update_mode(&c->tty, mode, s);
@@ -1173,7 +1231,7 @@ server_client_set_title(struct client *c)
 
 	template = options_get_string(s->options, "set-titles-string");
 
-	ft = format_create(NULL, 0);
+	ft = format_create(NULL, FORMAT_NONE, 0);
 	format_defaults(ft, c, NULL, NULL, NULL);
 
 	title = format_expand_time(ft, template, time(NULL));
@@ -1577,4 +1635,64 @@ server_client_push_stderr(struct client *c)
 		event_once(-1, EV_TIMEOUT, server_client_stderr_cb, c, NULL);
 		log_debug("%s: client %p, queued", __func__, c);
 	}
+}
+
+/* Add to client message log. */
+void
+server_client_add_message(struct client *c, const char *fmt, ...)
+{
+	struct message_entry	*msg, *msg1;
+	char			*s;
+	va_list			 ap;
+	u_int			 limit;
+
+	va_start(ap, fmt);
+	xvasprintf(&s, fmt, ap);
+	va_end(ap);
+
+	log_debug("%s: message %s", c->tty.path, s);
+
+	msg = xcalloc(1, sizeof *msg);
+	msg->msg_time = time(NULL);
+	msg->msg_num = c->message_next++;
+	msg->msg = s;
+	TAILQ_INSERT_TAIL(&c->message_log, msg, entry);
+
+	limit = options_get_number(global_options, "message-limit");
+	TAILQ_FOREACH_SAFE(msg, &c->message_log, entry, msg1) {
+		if (msg->msg_num + limit >= c->message_next)
+			break;
+		free(msg->msg);
+		TAILQ_REMOVE(&c->message_log, msg, entry);
+		free(msg);
+	}
+}
+
+/* Get client working directory. */
+const char *
+server_client_get_cwd(struct client *c)
+{
+	struct session	*s;
+
+	if (c != NULL && c->session == NULL && c->cwd != NULL)
+		return (c->cwd);
+	if (c != NULL && (s = c->session) != NULL && s->cwd != NULL)
+		return (s->cwd);
+	return (".");
+}
+
+/* Resolve an absolute path or relative to client working directory. */
+char *
+server_client_get_path(struct client *c, const char *file)
+{
+	char	*path, resolved[PATH_MAX];
+
+	if (*file == '/')
+		path = xstrdup(file);
+	else
+		xasprintf(&path, "%s/%s", server_client_get_cwd(c), file);
+	if (realpath(path, resolved) == NULL)
+		return (path);
+	free(path);
+	return (xstrdup(resolved));
 }

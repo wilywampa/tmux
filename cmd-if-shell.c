@@ -82,7 +82,7 @@ cmd_if_shell_exec(struct cmd *self, struct cmdq_item *item)
 	else
 		cwd = NULL;
 
-	ft = format_create(item, 0);
+	ft = format_create(item, FORMAT_NONE, 0);
 	format_defaults(ft, item->state.c, s, wl, wp);
 	shellcmd = format_expand(ft, args->argv[0]);
 	format_free(ft);
@@ -96,7 +96,8 @@ cmd_if_shell_exec(struct cmd *self, struct cmdq_item *item)
 		free(shellcmd);
 		if (cmd == NULL)
 			return (CMD_RETURN_NORMAL);
-		if (cmd_string_parse(cmd, &cmdlist, NULL, 0, &cause) != 0) {
+		cmdlist = cmd_string_parse(cmd, NULL, 0, &cause);
+		if (cmdlist == NULL) {
 			if (cause != NULL) {
 				cmdq_error(item, "%s", cause);
 				free(cause);
@@ -167,7 +168,8 @@ cmd_if_shell_callback(struct job *job)
 	if (cmd == NULL)
 		goto out;
 
-	if (cmd_string_parse(cmd, &cmdlist, file, line, &cause) != 0) {
+	cmdlist = cmd_string_parse(cmd, file, line, &cause);
+	if (cmdlist == NULL) {
 		if (cause != NULL)
 			new_item = cmdq_get_callback(cmd_if_shell_error, cause);
 		else

@@ -81,6 +81,7 @@ static void	 format_defaults_winlink(struct format_tree *, struct session *,
 
 /* Entry in format job tree. */
 struct format_job {
+	u_int			 tag;
 	const char		*cmd;
 	const char		*expanded;
 
@@ -103,6 +104,10 @@ RB_GENERATE_STATIC(format_job_tree, format_job, entry, format_job_cmp);
 static int
 format_job_cmp(struct format_job *fj1, struct format_job *fj2)
 {
+	if (fj1->tag < fj2->tag)
+		return (-1);
+	if (fj1->tag > fj2->tag)
+		return (1);
 	return (strcmp(fj1->cmd, fj2->cmd));
 }
 
@@ -127,6 +132,7 @@ struct format_tree {
 	struct session		*s;
 	struct window_pane	*wp;
 
+	u_int			 tag;
 	int			 flags;
 
 	RB_HEAD(format_entry_tree, format_entry) tree;
@@ -242,9 +248,11 @@ format_job_get(struct format_tree *ft, const char *cmd)
 	char			*expanded;
 	int			 force;
 
+	fj0.tag = ft->tag;
 	fj0.cmd = cmd;
 	if ((fj = RB_FIND(format_job_tree, &format_jobs, &fj0)) == NULL) {
 		fj = xcalloc(1, sizeof *fj);
+		fj->tag = ft->tag;
 		fj->cmd = xstrdup(cmd);
 		fj->expanded = NULL;
 
@@ -516,7 +524,7 @@ format_merge(struct format_tree *ft, struct format_tree *from)
 
 /* Create a new tree. */
 struct format_tree *
-format_create(struct cmdq_item *item, int flags)
+format_create(struct cmdq_item *item, int tag, int flags)
 {
 	struct format_tree	*ft;
 
@@ -527,8 +535,11 @@ format_create(struct cmdq_item *item, int flags)
 
 	ft = xcalloc(1, sizeof *ft);
 	RB_INIT(&ft->tree);
+
+	ft->tag = tag;
 	ft->flags = flags;
 
+	format_add(ft, "version", "%s", VERSION);
 	format_add_cb(ft, "host", format_cb_host);
 	format_add_cb(ft, "host_short", format_cb_host_short);
 	format_add_cb(ft, "pid", format_cb_pid);
@@ -639,39 +650,29 @@ static char *
 format_find(struct format_tree *ft, const char *key, int modifiers)
 {
 	struct format_entry	*fe, fe_find;
-	struct options_entry	*o;
 	struct environ_entry	*envent;
 	static char		 s[64];
+	struct options_entry	*o;
 	const char		*found;
+	int			 idx;
 	char			*copy, *saved;
 
-	found = NULL;
-
 	if (~modifiers & FORMAT_TIMESTRING) {
-		o = options_find(global_options, key);
+		o = options_parse_get(global_options, key, &idx, 0);
 		if (o == NULL && ft->w != NULL)
-			o = options_find(ft->w->options, key);
+			o = options_parse_get(ft->w->options, key, &idx, 0);
 		if (o == NULL)
-			o = options_find(global_w_options, key);
+			o = options_parse_get(global_w_options, key, &idx, 0);
 		if (o == NULL && ft->s != NULL)
-			o = options_find(ft->s->options, key);
+			o = options_parse_get(ft->s->options, key, &idx, 0);
 		if (o == NULL)
-			o = options_find(global_s_options, key);
+			o = options_parse_get(global_s_options, key, &idx, 0);
 		if (o != NULL) {
-			switch (o->type) {
-			case OPTIONS_STRING:
-				found = o->str;
-				goto found;
-			case OPTIONS_NUMBER:
-				xsnprintf(s, sizeof s, "%lld", o->num);
-				found = s;
-				goto found;
-			case OPTIONS_STYLE:
-				found = style_tostring(&o->style);
-				goto found;
-			}
+			found = options_tostring(o, idx, 1);
+			goto found;
 		}
 	}
+	found = NULL;
 
 	fe_find.key = (char *) key;
 	fe = RB_FIND(format_entry_tree, &ft->tree, &fe_find);
@@ -726,6 +727,50 @@ found:
 	return (copy);
 }
 
+/* Skip until comma. */
+static char *
+format_skip(char *s)
+{
+	int	brackets = 0;
+
+	for (; *s != '\0'; s++) {
+		if (*s == '{')
+			brackets++;
+		if (*s == '}')
+			brackets--;
+		if (*s == ',' && brackets == 0)
+			break;
+	}
+	if (*s == '\0')
+		return (NULL);
+	return (s);
+}
+
+/* Return left and right alternatives separated by commas. */
+static int
+format_choose(char *s, char **left, char **right)
+{
+	char	*cp;
+
+	cp = format_skip(s);
+	if (cp == NULL)
+		return (-1);
+	*cp = '\0';
+
+	*left = s;
+	*right = cp + 1;
+	return (0);
+}
+
+/* Is this true? */
+static int
+format_true(const char *s)
+{
+	if (s != NULL && *s != '\0' && (s[0] != '0' || s[1] != '\0'))
+		return (1);
+	return (0);
+}
+
 /*
  * Replace a key/value pair in buffer. #{blah} is expanded directly,
  * #{?blah,a,b} is replace with a if blah exists and is nonzero else b.
@@ -735,10 +780,10 @@ format_replace(struct format_tree *ft, const char *key, size_t keylen,
     char **buf, size_t *len, size_t *off)
 {
 	char		*copy, *copy0, *endptr, *ptr, *found, *new, *value;
-	char		*from = NULL, *to = NULL;
+	char		*from = NULL, *to = NULL, *left, *right;
 	size_t		 valuelen, newlen, fromlen, tolen, used;
 	long		 limit = 0;
-	int		 modifiers = 0, brackets;
+	int		 modifiers = 0, compare = 0;
 
 	/* Make a copy of the key. */
 	copy0 = copy = xmalloc(keylen + 1);
@@ -747,7 +792,19 @@ format_replace(struct format_tree *ft, const char *key, size_t keylen,
 
 	/* Is there a length limit or whatnot? */
 	switch (copy[0]) {
+	case '!':
+		if (copy[1] == '=' && copy[2] == ':') {
+			compare = -1;
+			copy += 3;
+			break;
+		}
+		break;
 	case '=':
+		if (copy[1] == '=' && copy[2] == ':') {
+			compare = 1;
+			copy += 3;
+			break;
+		}
 		errno = 0;
 		limit = strtol(copy + 1, &endptr, 10);
 		if (errno == ERANGE && (limit == LONG_MIN || limit == LONG_MAX))
@@ -799,39 +856,41 @@ format_replace(struct format_tree *ft, const char *key, size_t keylen,
 		break;
 	}
 
-	/*
-	 * Is this a conditional? If so, check it exists and extract either the
-	 * first or second element. If not, look up the key directly.
-	 */
-	if (*copy == '?') {
-		ptr = strchr(copy, ',');
+	/* Is this a comparison or a conditional? */
+	if (compare != 0) {
+		/* Comparison: compare comma-separated left and right. */
+		if (format_choose(copy, &left, &right) != 0)
+			goto fail;
+		left = format_expand(ft, left);
+		right = format_expand(ft, right);
+		if (compare == 1 && strcmp(left, right) == 0)
+			value = xstrdup("1");
+		else if (compare == -1 && strcmp(left, right) != 0)
+			value = xstrdup("1");
+		else
+			value = xstrdup("0");
+		free(right);
+		free(left);
+	} else if (*copy == '?') {
+		/* Conditional: check first and choose second or third. */
+		ptr = format_skip(copy);
 		if (ptr == NULL)
 			goto fail;
 		*ptr = '\0';
 
-		value = ptr + 1;
 		found = format_find(ft, copy + 1, modifiers);
-
-		brackets = 0;
-		for (ptr = ptr + 1; *ptr != '\0'; ptr++) {
-			if (*ptr == '{')
-				brackets++;
-			if (*ptr == '}')
-				brackets--;
-			if (*ptr == ',' && brackets == 0)
-				break;
-		}
-		if (*ptr == '\0')
+		if (found == NULL)
+			found = format_expand(ft, copy + 1);
+		if (format_choose(ptr + 1, &left, &right) != 0)
 			goto fail;
 
-		if (found != NULL && *found != '\0' &&
-		    (found[0] != '0' || found[1] != '\0')) {
-			*ptr = '\0';
-		} else
-			value = ptr + 1;
-		value = format_expand(ft, value);
+		if (format_true(found))
+			value = format_expand(ft, left);
+		else
+			value = format_expand(ft, right);
 		free(found);
 	} else {
+		/* Neither: look up directly. */
 		value = format_find(ft, copy, modifiers);
 		if (value == NULL)
 			value = xstrdup("");
@@ -953,7 +1012,10 @@ format_expand(struct format_tree *ft, const char *fmt)
 				break;
 			n = ptr - fmt;
 
-			out = format_job_get(ft, xstrndup(fmt, n));
+			if (ft->flags & FORMAT_NOJOBS)
+				out = xstrdup("");
+			else
+				out = format_job_get(ft, xstrndup(fmt, n));
 			outlen = strlen(out);
 
 			while (len - off < outlen + 1) {
@@ -1055,10 +1117,10 @@ format_defaults_session(struct format_tree *ft, struct session *s)
 	format_add(ft, "session_height", "%u", s->sy);
 	format_add(ft, "session_id", "$%u", s->id);
 
-	sg = session_group_find(s);
+	sg = session_group_contains(s);
 	format_add(ft, "session_grouped", "%d", sg != NULL);
 	if (sg != NULL)
-		format_add(ft, "session_group", "%u", session_group_index(sg));
+		format_add(ft, "session_group", "%s", sg->name);
 
 	format_add_tv(ft, "session_created", &s->creation_time);
 	format_add_tv(ft, "session_last_attached", &s->last_attached_time);
@@ -1076,19 +1138,24 @@ format_defaults_client(struct format_tree *ft, struct client *c)
 {
 	struct session	*s;
 	const char	*name;
+	struct tty	*tty = &c->tty;
+	const char	*types[] = TTY_TYPES;
 
 	if (ft->s == NULL)
 		ft->s = c->session;
 
 	format_add(ft, "client_pid", "%ld", (long) c->pid);
-	format_add(ft, "client_height", "%u", c->tty.sy);
-	format_add(ft, "client_width", "%u", c->tty.sx);
-	if (c->tty.path != NULL)
-		format_add(ft, "client_tty", "%s", c->tty.path);
-	if (c->tty.termname != NULL)
-		format_add(ft, "client_termname", "%s", c->tty.termname);
+	format_add(ft, "client_height", "%u", tty->sy);
+	format_add(ft, "client_width", "%u", tty->sx);
+	if (tty->path != NULL)
+		format_add(ft, "client_tty", "%s", tty->path);
 	format_add(ft, "client_control_mode", "%d",
 		!!(c->flags & CLIENT_CONTROL));
+
+	if (tty->term_name != NULL)
+		format_add(ft, "client_termname", "%s", tty->term_name);
+	if (tty->term_name != NULL)
+		format_add(ft, "client_termtype", "%s", types[tty->term_type]);
 
 	format_add_tv(ft, "client_created", &c->creation_time);
 	format_add_tv(ft, "client_activity", &c->activity_time);
@@ -1100,7 +1167,7 @@ format_defaults_client(struct format_tree *ft, struct client *c)
 		format_add(ft, "client_prefix", "%d", 1);
 	format_add(ft, "client_key_table", "%s", c->keytable->name);
 
-	if (c->tty.flags & TTY_UTF8)
+	if (tty->flags & TTY_UTF8)
 		format_add(ft, "client_utf8", "%d", 1);
 	else
 		format_add(ft, "client_utf8", "%d", 0);
@@ -1243,11 +1310,13 @@ format_defaults_pane(struct format_tree *ft, struct window_pane *wp)
 	    !!(wp->base.mode & MODE_WRAP));
 
 	format_add(ft, "mouse_any_flag", "%d",
-	    !!(wp->base.mode & (MODE_MOUSE_STANDARD|MODE_MOUSE_BUTTON)));
+	    !!(wp->base.mode & ALL_MOUSE_MODES));
 	format_add(ft, "mouse_standard_flag", "%d",
 	    !!(wp->base.mode & MODE_MOUSE_STANDARD));
 	format_add(ft, "mouse_button_flag", "%d",
 	    !!(wp->base.mode & MODE_MOUSE_BUTTON));
+	format_add(ft, "mouse_all_flag", "%d",
+	    !!(wp->base.mode & MODE_MOUSE_ALL));
 
 	format_add_cb(ft, "pane_tabs", format_cb_pane_tabs);
 }

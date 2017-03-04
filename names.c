@@ -121,9 +121,10 @@ static char *
 format_window_name(struct window *w)
 {
 	struct format_tree	*ft;
-	char			*fmt, *name;
+	const char		*fmt;
+	char			*name;
 
-	ft = format_create(NULL, 0);
+	ft = format_create(NULL, FORMAT_WINDOW|w->id, 0);
 	format_defaults_window(ft, w);
 	format_defaults_pane(ft, w->active);
 

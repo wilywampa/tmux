@@ -45,6 +45,15 @@ grid_view_set_cell(struct grid *gd, u_int px, u_int py,
 	grid_set_cell(gd, grid_view_x(gd, px), grid_view_y(gd, py), gc);
 }
 
+/* Set cells. */
+void
+grid_view_set_cells(struct grid *gd, u_int px, u_int py,
+    const struct grid_cell *gc, const char *s, size_t slen)
+{
+	grid_set_cells(gd, grid_view_x(gd, px), grid_view_y(gd, py), gc, s,
+	    slen);
+}
+
 /* Clear into history. */
 void
 grid_view_clear_history(struct grid *gd, u_int bg)
@@ -185,7 +194,7 @@ grid_view_insert_cells(struct grid *gd, u_int px, u_int py, u_int nx, u_int bg)
 
 	sx = grid_view_x(gd, gd->sx);
 
-	if (px == sx - 1)
+	if (px >= sx - 1)
 		grid_clear(gd, px, py, 1, 1, bg);
 	else
 		grid_move_cells(gd, px + nx, px, py, sx - px - nx, bg);

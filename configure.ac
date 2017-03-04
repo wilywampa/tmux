@@ -1,6 +1,6 @@
 # configure.ac
 
-AC_INIT(tmux, 2.4)
+AC_INIT(tmux, master)
 
 AC_CONFIG_AUX_DIR(etc)
 AM_INIT_AUTOMAKE([foreign subdir-objects])
@@ -162,31 +162,46 @@ fi
 
 # Look for ncurses.
 PKG_CHECK_MODULES(
-	LIBNCURSES,
-	ncurses,
-	[
-		AM_CFLAGS="$LIBNCURSES_CFLAGS $AM_CFLAGS"
-		CFLAGS="$AM_CFLAGS $SAVED_CFLAGS"
-		LIBS="$LIBNCURSES_LIBS $LIBS"
-		found_ncurses=yes
-	],
+	LIBTINFO,
+	tinfo,
+	found_ncurses=yes,
 	found_ncurses=no
 )
 if test "x$found_ncurses" = xno; then
+	PKG_CHECK_MODULES(
+		LIBNCURSES,
+		ncurses,
+		found_ncurses=yes,
+		found_ncurses=no
+	)
+fi
+if test "x$found_ncurses" = xno; then
+	PKG_CHECK_MODULES(
+		LIBNCURSES,
+		ncursesw,
+		found_ncurses=yes,
+		found_ncurses=no
+	)
+fi
+if test "x$found_ncurses" = xyes; then
+	CPPFLAGS="$LIBNCURSES_CFLAGS $LIBTINFO_CFLAGS $CPPFLAGS"
+	LIBS="$LIBNCURSES_LIBS $LIBTINFO_LIBS $LIBS"
+else
 	# pkg-config didn't work, try ncurses.
 	AC_CHECK_LIB(
-		ncurses,
+		[tinfo ncurses],
 		setupterm,
 		found_ncurses=yes,
 		found_ncurses=no
 	)
-	AC_CHECK_HEADER(
-		ncurses.h,
-		,
-		found_ncurses=no)
+	if test "x$found_ncurses" = xyes; then
+		AC_CHECK_HEADER(
+			ncurses.h,
+			LIBS="$LIBS -lncurses",
+			found_ncurses=no)
+	fi
 fi
 if test "x$found_ncurses" = xyes; then
-	LIBS="$LIBS -lncurses"
 	AC_DEFINE(HAVE_NCURSES_H)
 else
 	# No ncurses, try curses.
@@ -204,7 +219,7 @@ else
 		LIBS="$LIBS -lcurses"
 		AC_DEFINE(HAVE_CURSES_H)
 	else
-		AC_MSG_ERROR("curses or ncurses not found")
+		AC_MSG_ERROR("curses not found")
 	fi
 fi
 
@@ -222,9 +237,11 @@ if test "x$enable_utempter" = xyes; then
 			enable_utempter=yes,
 			enable_utempter=no
 		)
-		if test "x$enable_utempter" = xyes; then
-			AC_DEFINE(HAVE_UTEMPTER)
-		fi
+	fi
+	if test "x$enable_utempter" = xyes; then
+		AC_DEFINE(HAVE_UTEMPTER)
+	else
+		AC_MSG_ERROR("utempter not found")
 	fi
 fi
 
@@ -242,14 +259,16 @@ if test "x$enable_utf8proc" = xyes; then
 			enable_utf8proc=yes,
 			enable_utf8proc=no
 		)
-		if test "x$enable_utf8proc" = xyes; then
-			AC_DEFINE(HAVE_UTF8PROC)
-		fi
+	fi
+	if test "x$enable_utf8proc" = xyes; then
+		AC_DEFINE(HAVE_UTF8PROC)
+	else
+		AC_MSG_ERROR("utf8proc not found")
 	fi
 fi
 AM_CONDITIONAL(HAVE_UTF8PROC, [test "x$enable_utf8proc" = xyes])
 
-# Check for b64_ntop.
+# Check for b64_ntop. If we have b64_ntop, we assume b64_pton as well.
 AC_MSG_CHECKING(for b64_ntop)
 AC_TRY_LINK(
 	[
@@ -449,6 +468,17 @@ if test "x$found_stravis" = xyes; then
 	fi
 fi
 if test "x$found_stravis" = xyes; then
+	AC_CHECK_DECL(
+		VIS_DQ,
+		,
+		found_stravis=no,
+		[
+			#include <stdlib.h>
+			#include <vis.h>
+		]
+)
+fi
+if test "x$found_stravis" = xyes; then
 	AC_DEFINE(HAVE_VIS)
 fi
 AM_CONDITIONAL(NO_VIS, [test "x$found_stravis" = xno])
@@ -510,6 +540,12 @@ AC_COMPILE_IFELSE([AC_LANG_SOURCE(
 )
 
 # Look for a suitable queue.h.
+AC_CHECK_DECL(
+	TAILQ_CONCAT,
+	found_queue_h=yes,
+	found_queue_h=no,
+	[#include <sys/queue.h>]
+)
 AC_CHECK_DECL(
 	TAILQ_PREV,
 	found_queue_h=yes,

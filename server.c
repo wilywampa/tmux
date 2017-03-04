@@ -147,19 +147,15 @@ server_start(struct event_base *base, int lockfd, char *lockfile)
 
 	if (log_get_level() > 3)
 		tty_create_log();
-
-#ifdef __OpenBSD__
 	if (pledge("stdio rpath wpath cpath fattr unix getpw recvfd proc exec "
 	    "tty ps", NULL) != 0)
 		fatal("pledge failed");
-#endif
 
 	RB_INIT(&windows);
 	RB_INIT(&all_window_panes);
 	TAILQ_INIT(&clients);
 	RB_INIT(&sessions);
-	TAILQ_INIT(&session_groups);
-	mode_key_init_trees();
+	RB_INIT(&session_groups);
 	key_bindings_init();
 
 	gettimeofday(&start_time, NULL);

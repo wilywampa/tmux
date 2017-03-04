@@ -68,14 +68,14 @@ cmd_new_session_exec(struct cmd *self, struct cmdq_item *item)
 {
 	struct args		*args = self->args;
 	struct client		*c = item->client;
-	struct session		*s, *as;
-	struct session		*groupwith = item->state.tflag.s;
+	struct session		*s, *as, *groupwith;
 	struct window		*w;
 	struct environ		*env;
 	struct termios		 tio, *tiop;
-	const char		*newname, *target, *update, *errstr, *template;
-	const char		*path, *cwd, *to_free = NULL;
-	char		       **argv, *cmd, *cause, *cp;
+	struct session_group	*sg;
+	const char		*newname, *errstr, *template, *group, *prefix;
+	const char		*path, *cmd, *cwd, *to_free = NULL;
+	char		       **argv, *cause, *cp;
 	int			 detached, already_attached, idx, argc;
 	u_int			 sx, sy;
 	struct format_tree	*ft;
@@ -119,13 +119,29 @@ cmd_new_session_exec(struct cmd *self, struct cmdq_item *item)
 		}
 	}
 
-	if ((target = args_get(args, 't')) != NULL) {
+	/* Is this going to be part of a session group? */
+	group = args_get(args, 't');
+	if (group != NULL) {
+		groupwith = item->state.tflag.s;
 		if (groupwith == NULL) {
-			cmdq_error(item, "no such session: %s", target);
-			goto error;
-		}
-	} else
+			if (!session_check_name(group)) {
+				cmdq_error(item, "bad group name: %s", group);
+				goto error;
+			}
+			sg = session_group_find(group);
+		} else
+			sg = session_group_contains(groupwith);
+		if (sg != NULL)
+			prefix = sg->name;
+		else if (groupwith != NULL)
+			prefix = groupwith->name;
+		else
+			prefix = group;
+	} else {
 		groupwith = NULL;
+		sg = NULL;
+		prefix = NULL;
+	}
 
 	/* Set -d if no client. */
 	detached = args_has(args, 'd');
@@ -139,7 +155,7 @@ cmd_new_session_exec(struct cmd *self, struct cmdq_item *item)
 
 	/* Get the new session working directory. */
 	if (args_has(args, 'c')) {
-		ft = format_create(item, 0);
+		ft = format_create(item, FORMAT_NONE, 0);
 		format_defaults(ft, c, NULL, NULL, NULL);
 		to_free = cwd = format_expand(ft, args_get(args, 'c'));
 		format_free(ft);
@@ -213,11 +229,11 @@ cmd_new_session_exec(struct cmd *self, struct cmdq_item *item)
 	if (!args_has(args, 't') && args->argc != 0) {
 		argc = args->argc;
 		argv = args->argv;
-	} else if (groupwith == NULL) {
+	} else if (sg == NULL && groupwith == NULL) {
 		cmd = options_get_string(global_s_options, "default-command");
 		if (cmd != NULL && *cmd != '\0') {
 			argc = 1;
-			argv = &cmd;
+			argv = (char **)&cmd;
 		} else {
 			argc = 0;
 			argv = NULL;
@@ -234,16 +250,13 @@ cmd_new_session_exec(struct cmd *self, struct cmdq_item *item)
 
 	/* Construct the environment. */
 	env = environ_create();
-	if (c != NULL && !args_has(args, 'E')) {
-		update = options_get_string(global_s_options,
-		    "update-environment");
-		environ_update(update, c->environ, env);
-	}
+	if (c != NULL && !args_has(args, 'E'))
+		environ_update(global_s_options, c->environ, env);
 
 	/* Create the new session. */
 	idx = -1 - options_get_number(global_s_options, "base-index");
-	s = session_create(newname, argc, argv, path, cwd, env, tiop, idx, sx,
-	    sy, &cause);
+	s = session_create(prefix, newname, argc, argv, path, cwd, env, tiop,
+	    idx, sx, sy, &cause);
 	environ_free(env);
 	if (s == NULL) {
 		cmdq_error(item, "create session failed: %s", cause);
@@ -262,8 +275,15 @@ cmd_new_session_exec(struct cmd *self, struct cmdq_item *item)
 	 * If a target session is given, this is to be part of a session group,
 	 * so add it to the group and synchronize.
 	 */
-	if (groupwith != NULL) {
-		session_group_add(groupwith, s);
+	if (group != NULL) {
+		if (sg == NULL) {
+			if (groupwith != NULL) {
+				sg = session_group_new(groupwith->name);
+				session_group_add(sg, groupwith);
+			} else
+				sg = session_group_new(group);
+		}
+		session_group_add(sg, s);
 		session_group_synchronize_to(s);
 		session_select(s, RB_MIN(winlinks, &s->windows)->idx);
 	}
@@ -280,7 +300,8 @@ cmd_new_session_exec(struct cmd *self, struct cmdq_item *item)
 		} else if (c->session != NULL)
 			c->last_session = c->session;
 		c->session = s;
-		server_client_set_key_table(c, NULL);
+		if (!item->repeat)
+			server_client_set_key_table(c, NULL);
 		status_timer_start(c);
 		notify_client("client-session-changed", c);
 		session_update_activity(s, NULL);
@@ -302,7 +323,7 @@ cmd_new_session_exec(struct cmd *self, struct cmdq_item *item)
 		if ((template = args_get(args, 'F')) == NULL)
 			template = NEW_SESSION_TEMPLATE;
 
-		ft = format_create(item, 0);
+		ft = format_create(item, FORMAT_NONE, 0);
 		format_defaults(ft, c, s, NULL, NULL);
 
 		cp = format_expand(ft, template);
