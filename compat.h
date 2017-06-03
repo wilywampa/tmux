@@ -18,10 +18,12 @@
 #define COMPAT_H
 
 #include <sys/types.h>
+#include <sys/ioctl.h>
 #include <sys/uio.h>
 
 #include <limits.h>
 #include <stdio.h>
+#include <termios.h>
 #include <wchar.h>
 
 #ifndef __GNUC__
@@ -50,11 +52,13 @@
 #include <sys/filio.h>
 #endif
 
-#ifndef HAVE_BSD_TYPES
-typedef uint8_t u_int8_t;
-typedef uint16_t u_int16_t;
-typedef uint32_t u_int32_t;
-typedef uint64_t u_int64_t;
+#ifdef HAVE_ERR_H
+#include <err.h>
+#else
+void	err(int, const char *, ...);
+void	errx(int, const char *, ...);
+void	warn(const char *, ...);
+void	warnx(const char *, ...);
 #endif
 
 #ifndef HAVE_PATHS_H
@@ -207,6 +211,16 @@ typedef uint64_t u_int64_t;
 #define flock(fd, op) (0)
 #endif
 
+#ifndef HAVE_EXPLICIT_BZERO
+/* explicit_bzero.c */
+void		 explicit_bzero(void *, size_t);
+#endif
+
+#ifndef HAVE_GETDTABLECOUNT
+/* getdtablecount.c */
+int		 getdtablecount(void);
+#endif
+
 #ifndef HAVE_CLOSEFROM
 /* closefrom.c */
 void		 closefrom(int);
@@ -237,6 +251,16 @@ size_t	 	 strlcpy(char *, const char *, size_t);
 size_t	 	 strlcat(char *, const char *, size_t);
 #endif
 
+#ifndef HAVE_STRNLEN
+/* strnlen.c */
+size_t		 strnlen(const char *, size_t);
+#endif
+
+#ifndef HAVE_STRNDUP
+/* strndup.c */
+char		*strndup(const char *, size_t);
+#endif
+
 #ifndef HAVE_DAEMON
 /* daemon.c */
 int	 	 daemon(int, int);
@@ -260,9 +284,15 @@ int		 b64_ntop(const char *, size_t, char *, size_t);
 int		 b64_pton(const char *, u_char *, size_t);
 #endif
 
+#ifndef HAVE_FDFORKPTY
+/* fdforkpty.c */
+int		 getptmfd(void);
+pid_t		 fdforkpty(int, int *, char *, struct termios *,
+		     struct winsize *);
+#endif
+
 #ifndef HAVE_FORKPTY
 /* forkpty.c */
-#include <sys/ioctl.h>
 pid_t		 forkpty(int *, char *, struct termios *, struct winsize *);
 #endif
 
@@ -292,9 +322,19 @@ int		 unsetenv(const char *);
 void		 cfmakeraw(struct termios *);
 #endif
 
+#ifndef HAVE_FREEZERO
+/* freezero.c */
+void		 freezero(void *, size_t);
+#endif
+
 #ifndef HAVE_REALLOCARRAY
 /* reallocarray.c */
 void		*reallocarray(void *, size_t, size_t);
+#endif
+
+#ifndef HAVE_RECALLOCARRAY
+/* recallocarray.c */
+void		*recallocarray(void *, size_t, size_t, size_t);
 #endif
 
 #ifdef HAVE_UTF8PROC
@@ -304,9 +344,7 @@ int		 utf8proc_mbtowc(wchar_t *, const char *, size_t);
 int		 utf8proc_wctomb(char *, wchar_t);
 #endif
 
-#ifdef HAVE_GETOPT
-#include <getopt.h>
-#else
+#ifndef HAVE_GETOPT
 /* getopt.c */
 extern int	BSDopterr;
 extern int	BSDoptind;

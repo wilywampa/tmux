@@ -22,7 +22,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <fnmatch.h>
-#include <signal.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -186,11 +185,11 @@ winlink_set_window(struct winlink *wl, struct window *w)
 {
 	if (wl->window != NULL) {
 		TAILQ_REMOVE(&wl->window->winlinks, wl, wentry);
-		window_remove_ref(w);
+		window_remove_ref(wl->window, __func__);
 	}
 	TAILQ_INSERT_TAIL(&w->winlinks, wl, wentry);
 	wl->window = w;
-	w->references++;
+	window_add_ref(w, __func__);
 }
 
 void
@@ -200,7 +199,7 @@ winlink_remove(struct winlinks *wwl, struct winlink *wl)
 
 	if (w != NULL) {
 		TAILQ_REMOVE(&w->winlinks, wl, wentry);
-		window_remove_ref(w);
+		window_remove_ref(w, __func__);
 	}
 
 	RB_REMOVE(winlinks, wwl, wl);
@@ -355,14 +354,15 @@ window_create_spawn(const char *name, int argc, char **argv, const char *path,
 	} else
 		w->name = default_window_name(w);
 
+	notify_window("window-pane-changed", w);
+
 	return (w);
 }
 
 static void
 window_destroy(struct window *w)
 {
-	if (!TAILQ_EMPTY(&w->winlinks))
-		fatalx("window destroyed with winlinks");
+	log_debug("window @%u destroyed (%d references)", w->id, w->references);
 
 	RB_REMOVE(windows, &windows, w);
 
@@ -387,11 +387,18 @@ window_destroy(struct window *w)
 }
 
 void
-window_remove_ref(struct window *w)
+window_add_ref(struct window *w, const char *from)
 {
-	if (w->references == 0)
-		fatal("bad reference count");
+	w->references++;
+	log_debug("%s: @%u %s, now %d", __func__, w->id, from, w->references);
+}
+
+void
+window_remove_ref(struct window *w, const char *from)
+{
 	w->references--;
+	log_debug("%s: @%u %s, now %d", __func__, w->id, from, w->references);
+
 	if (w->references == 0)
 		window_destroy(w);
 }
@@ -435,11 +442,14 @@ window_set_active_pane(struct window *w, struct window_pane *wp)
 		w->active = TAILQ_PREV(w->active, window_panes, entry);
 		if (w->active == NULL)
 			w->active = TAILQ_LAST(&w->panes, window_panes);
-		if (w->active == wp)
+		if (w->active == wp) {
+			notify_window("window-pane-changed", w);
 			return (1);
+		}
 	}
 	w->active->active_point = next_active_point++;
 	w->active->flags |= PANE_CHANGED;
+	notify_window("window-pane-changed", w);
 	return (1);
 }
 
@@ -588,12 +598,16 @@ window_add_pane(struct window *w, struct window_pane *other, int before,
 		other = w->active;
 
 	wp = window_pane_create(w, w->sx, w->sy, hlimit);
-	if (TAILQ_EMPTY(&w->panes))
+	if (TAILQ_EMPTY(&w->panes)) {
+		log_debug("%s: @%u at start", __func__, w->id);
 		TAILQ_INSERT_HEAD(&w->panes, wp, entry);
-	else if (before)
+	} else if (before) {
+		log_debug("%s: @%u before %%%u", __func__, w->id, wp->id);
 		TAILQ_INSERT_BEFORE(other, wp, entry);
-	else
+	} else {
+		log_debug("%s: @%u after %%%u", __func__, w->id, wp->id);
 		TAILQ_INSERT_AFTER(&w->panes, other, wp, entry);
+	}
 	return (wp);
 }
 
@@ -611,8 +625,10 @@ window_lost_pane(struct window *w, struct window_pane *wp)
 			if (w->active == NULL)
 				w->active = TAILQ_NEXT(wp, entry);
 		}
-		if (w->active != NULL)
+		if (w->active != NULL) {
 			w->active->flags |= PANE_CHANGED;
+			notify_window("window-pane-changed", w);
+		}
 	} else if (wp == w->last)
 		w->last = NULL;
 }
@@ -705,12 +721,12 @@ window_destroy_panes(struct window *w)
 	}
 }
 
-/* Retuns the printable flags on a window, empty string if no flags set. */
-char *
-window_printable_flags(struct session *s, struct winlink *wl)
+const char *
+window_printable_flags(struct winlink *wl)
 {
-	char	flags[32];
-	int	pos;
+	struct session	*s = wl->session;
+	static char	 flags[32];
+	int		 pos;
 
 	pos = 0;
 	if (wl->flags & WINLINK_ACTIVITY)
@@ -728,7 +744,7 @@ window_printable_flags(struct session *s, struct winlink *wl)
 	if (wl->window->flags & WINDOW_ZOOMED)
 		flags[pos++] = 'Z';
 	flags[pos] = '\0';
-	return (xstrdup(flags));
+	return (flags);
 }
 
 struct window_pane *
@@ -783,8 +799,8 @@ window_pane_create(struct window *w, u_int sx, u_int sy, u_int hlimit)
 	wp->xoff = 0;
 	wp->yoff = 0;
 
-	wp->sx = sx;
-	wp->sy = sy;
+	wp->sx = wp->osx = sx;
+	wp->sy = wp->osx = sy;
 
 	wp->pipe_fd = -1;
 	wp->pipe_off = 0;
@@ -811,6 +827,7 @@ static void
 window_pane_destroy(struct window_pane *wp)
 {
 	window_pane_reset_mode(wp);
+	free(wp->searchstr);
 
 	if (wp->fd != -1) {
 #ifdef HAVE_UTEMPTER
@@ -885,7 +902,7 @@ window_pane_spawn(struct window_pane *wp, int argc, char **argv,
 	ws.ws_col = screen_size_x(&wp->base);
 	ws.ws_row = screen_size_y(&wp->base);
 
-	wp->pid = pty_fork(ptm_fd, &wp->fd, wp->tty, sizeof wp->tty, &ws);
+	wp->pid = fdforkpty(ptm_fd, &wp->fd, wp->tty, NULL, &ws);
 	switch (wp->pid) {
 	case -1:
 		wp->fd = -1;
@@ -1168,7 +1185,8 @@ window_pane_mode_timer(__unused int fd, __unused short events, void *arg)
 }
 
 int
-window_pane_set_mode(struct window_pane *wp, const struct window_mode *mode)
+window_pane_set_mode(struct window_pane *wp, const struct window_mode *mode,
+    struct cmd_find_state *fs, struct args *args)
 {
 	struct screen	*s;
 	struct timeval	 tv = { .tv_sec = 10 };
@@ -1181,11 +1199,12 @@ window_pane_set_mode(struct window_pane *wp, const struct window_mode *mode)
 	evtimer_set(&wp->modetimer, window_pane_mode_timer, wp);
 	evtimer_add(&wp->modetimer, &tv);
 
-	if ((s = wp->mode->init(wp)) != NULL)
+	if ((s = wp->mode->init(wp, fs, args)) != NULL)
 		wp->screen = s;
 	wp->flags |= (PANE_REDRAW|PANE_CHANGED);
 
 	server_status_window(wp->window);
+	notify_pane("pane-mode-changed", wp);
 	return (0);
 }
 
@@ -1205,6 +1224,7 @@ window_pane_reset_mode(struct window_pane *wp)
 	wp->flags |= (PANE_REDRAW|PANE_CHANGED);
 
 	server_status_window(wp->window);
+	notify_pane("pane-mode-changed", wp);
 }
 
 void
@@ -1262,30 +1282,28 @@ window_pane_visible(struct window_pane *wp)
 	return (!window_pane_outside(wp));
 }
 
-char *
-window_pane_search(struct window_pane *wp, const char *searchstr,
-    u_int *lineno)
+u_int
+window_pane_search(struct window_pane *wp, const char *searchstr)
 {
 	struct screen	*s = &wp->base;
-	char		*newsearchstr, *line, *msg;
-	u_int	 	 i;
+	char		*newsearchstr, *line;
+	u_int		 i;
 
-	msg = NULL;
 	xasprintf(&newsearchstr, "*%s*", searchstr);
 
 	for (i = 0; i < screen_size_y(s); i++) {
 		line = grid_view_string_cells(s->grid, 0, i, screen_size_x(s));
 		if (fnmatch(newsearchstr, line, 0) == 0) {
-			msg = line;
-			if (lineno != NULL)
-				*lineno = i;
+			free(line);
 			break;
 		}
 		free(line);
 	}
 
 	free(newsearchstr);
-	return (msg);
+	if (i == screen_size_y(s))
+		return (0);
+	return (i + 1);
 }
 
 /* Get MRU pane from a list. */
@@ -1316,16 +1334,17 @@ window_pane_find_up(struct window_pane *wp)
 {
 	struct window_pane	*next, *best, **list;
 	u_int			 edge, left, right, end, size;
-	int			 found;
+	int			 status, found;
 
 	if (wp == NULL || !window_pane_visible(wp))
 		return (NULL);
+	status = options_get_number(wp->window->options, "pane-border-status");
 
 	list = NULL;
 	size = 0;
 
 	edge = wp->yoff;
-	if (edge == 0)
+	if (edge == (status == 1 ? 1 : 0))
 		return wp;
 
 	left = wp->xoff;
@@ -1362,16 +1381,17 @@ window_pane_find_down(struct window_pane *wp)
 {
 	struct window_pane	*next, *best, **list;
 	u_int			 edge, left, right, end, size;
-	int			 found;
+	int			 status, found;
 
 	if (wp == NULL || !window_pane_visible(wp))
 		return (NULL);
+	status = options_get_number(wp->window->options, "pane-border-status");
 
 	list = NULL;
 	size = 0;
 
 	edge = wp->yoff + wp->sy + 1;
-	if (edge >= wp->window->sy)
+	if (edge >= wp->window->sy - (status == 2 ? 1 : 0))
 		return wp;
 
 	left = wp->xoff;

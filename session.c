@@ -188,13 +188,21 @@ session_create(const char *prefix, const char *name, int argc, char **argv,
 	return (s);
 }
 
+/* Add a reference to a session. */
+void
+session_add_ref(struct session *s, const char *from)
+{
+	s->references++;
+	log_debug("%s: %s %s, now %d", __func__, s->name, from, s->references);
+}
+
 /* Remove a reference from a session. */
 void
-session_unref(struct session *s)
+session_remove_ref(struct session *s, const char *from)
 {
-	log_debug("session %s has %d references", s->name, s->references);
-
 	s->references--;
+	log_debug("%s: %s %s, now %d", __func__, s->name, from, s->references);
+
 	if (s->references == 0)
 		event_once(-1, EV_TIMEOUT, session_free, s, NULL);
 }
@@ -247,7 +255,7 @@ session_destroy(struct session *s)
 
 	free((void *)s->cwd);
 
-	session_unref(s);
+	session_remove_ref(s, __func__);
 }
 
 /* Check a session name is valid: not empty and no colons or periods. */
@@ -354,16 +362,12 @@ session_new(struct session *s, const char *name, int argc, char **argv,
 	}
 	wl->session = s;
 
-	env = environ_create();
-	environ_copy(global_environ, env);
-	environ_copy(s->environ, env);
-	server_fill_environ(s, env);
-
 	shell = options_get_string(s->options, "default-shell");
 	if (*shell == '\0' || areshell(shell))
 		shell = _PATH_BSHELL;
 
 	hlimit = options_get_number(s->options, "history-limit");
+	env = environ_for_session(s, 0);
 	w = window_create_spawn(name, argc, argv, path, shell, cwd, env, s->tio,
 	    s->sx, s->sy, hlimit, cause);
 	if (w == NULL) {
@@ -372,8 +376,8 @@ session_new(struct session *s, const char *name, int argc, char **argv,
 		return (NULL);
 	}
 	winlink_set_window(wl, w);
-	notify_session_window("window-linked", s, w);
 	environ_free(env);
+	notify_session_window("window-linked", s, w);
 
 	session_group_synchronize_from(s);
 	return (wl);
@@ -548,6 +552,7 @@ session_set_current(struct session *s, struct winlink *wl)
 	s->curw = wl;
 	winlink_clear_flags(wl);
 	window_update_activity(wl->window);
+	notify_session("session-window-changed", s);
 	return (0);
 }
 

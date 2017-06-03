@@ -115,7 +115,7 @@ utf8_width(wchar_t wc)
 	width = wcwidth(wc);
 #endif
 	if (width < 0 || width > 0xff) {
-		log_debug("Unicode %04x, wcwidth() %d", wc, width);
+		log_debug("Unicode %04lx, wcwidth() %d", (long)wc, width);
 
 #ifndef __OpenBSD__
 		/*
@@ -427,8 +427,7 @@ utf8_rtrimcstr(const char *s, u_int width)
 	next = end - 1;
 
 	at = 0;
-	for (;;)
-	{
+	for (;;) {
 		if (at + next->width > width) {
 			next++;
 			break;

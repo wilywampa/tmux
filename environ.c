@@ -20,6 +20,7 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "tmux.h"
 
@@ -207,9 +208,15 @@ environ_push(struct environ *env)
 
 /* Log the environment. */
 void
-environ_log(struct environ *env, const char *prefix)
+environ_log(struct environ *env, const char *fmt, ...)
 {
 	struct environ_entry	*envent;
+	va_list			 ap;
+	char			*prefix;
+
+	va_start(ap, fmt);
+	vasprintf(&prefix, fmt, ap);
+	va_end(ap);
 
 	RB_FOREACH(envent, environ, env) {
 		if (envent->value != NULL && *envent->name != '\0') {
@@ -217,4 +224,33 @@ environ_log(struct environ *env, const char *prefix)
 			    envent->value);
 		}
 	}
+
+	free(prefix);
+}
+
+/* Create initial environment for new child. */
+struct environ *
+environ_for_session(struct session *s, int no_TERM)
+{
+	struct environ	*env;
+	const char	*value;
+	int		 idx;
+
+	env = environ_create();
+	environ_copy(global_environ, env);
+	if (s != NULL)
+		environ_copy(s->environ, env);
+
+	if (!no_TERM) {
+		value = options_get_string(global_options, "default-terminal");
+		environ_set(env, "TERM", "%s", value);
+	}
+
+	if (s != NULL)
+		idx = s->id;
+	else
+		idx = -1;
+	environ_set(env, "TMUX", "%s,%ld,%d", socket_path, (long)getpid(), idx);
+
+	return (env);
 }
