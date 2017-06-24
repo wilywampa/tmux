@@ -107,6 +107,7 @@ AC_REPLACE_FUNCS([ \
 	freezero \
 	getdtablecount \
 	getprogname \
+	memmem \
 	recallocarray \
 	reallocarray \
 	setenv \
@@ -175,7 +176,8 @@ if test "x$found_ncurses" = xno; then
 	)
 fi
 if test "x$found_ncurses" = xyes; then
-	CPPFLAGS="$LIBNCURSES_CFLAGS $LIBTINFO_CFLAGS $CPPFLAGS"
+	AM_CFLAGS="$LIBNCURSES_CFLAGS $LIBTINFO_CFLAGS $AM_CFLAGS"
+	CFLAGS="$LIBNCURSES_CFLAGS $LIBTINFO_CFLAGS $CFLAGS"
 	LIBS="$LIBNCURSES_LIBS $LIBTINFO_LIBS $LIBS"
 else
 	# pkg-config didn't work, try ncurses.
@@ -569,8 +571,15 @@ case "$host_os" in
 		;;
 	*darwin*)
 		AC_MSG_RESULT(darwin)
-		AC_DEFINE(BROKEN_CMSG_FIRSTHDR)
 		PLATFORM=darwin
+		#
+		# OS X CMSG_FIRSTHDR is broken, so redefine it with a working
+		# one. daemon works but has some stupid side effects, so use
+		# our internal version which has a workaround.
+		#
+		AC_DEFINE(BROKEN_CMSG_FIRSTHDR)
+		AC_LIBOBJ(daemon)
+		AC_LIBOBJ(daemon-darwin)
 		;;
 	*dragonfly*)
 		AC_MSG_RESULT(dragonfly)

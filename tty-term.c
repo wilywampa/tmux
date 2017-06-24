@@ -396,8 +396,8 @@ tty_term_find(char *name, int fd, char **cause)
 			return (term);
 		}
 	}
-
 	log_debug("new term: %s", name);
+
 	term = xmalloc(sizeof *term);
 	term->name = xstrdup(name);
 	term->references = 1;
@@ -541,6 +541,10 @@ tty_term_find(char *name, int fd, char **cause)
 		code->type = TTYCODE_STRING;
 	}
 
+	/* Log it. */
+	for (i = 0; i < tty_term_ncodes(); i++)
+		log_debug("%s%s", name, tty_term_describe(term, i));
+
 	return (term);
 
 error:
@@ -599,7 +603,7 @@ tty_term_string2(struct tty_term *term, enum tty_code_code code, int a, int b)
 const char *
 tty_term_string3(struct tty_term *term, enum tty_code_code code, int a, int b, int c)
 {
-	return (tparm((char *) tty_term_string(term, code), a, b, c));
+	return (tparm((char *) tty_term_string(term, code), a, b, c, 0, 0, 0, 0, 0, 0));
 }
 
 const char *

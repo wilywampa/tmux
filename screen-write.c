@@ -1339,8 +1339,10 @@ screen_write_cell(struct screen_write_ctx *ctx, const struct grid_cell *gc)
 
 	/* Check this will fit on the current line and wrap if not. */
 	if ((s->mode & MODE_WRAP) && s->cx > sx - width) {
+		log_debug("%s: wrapped at %u,%u", __func__, s->cx, s->cy);
 		screen_write_linefeed(ctx, 1, 8);
 		s->cx = 0;
+		screen_write_collect_flush(ctx, 1);
 	}
 
 	/* Sanity check cursor position. */
@@ -1390,7 +1392,7 @@ screen_write_cell(struct screen_write_ctx *ctx, const struct grid_cell *gc)
 		}
 	}
 
-	/* Update the selection the flag and set the cell. */
+	/* Update the selected flag and set the cell. */
 	selected = screen_check_selection(s, s->cx, s->cy);
 	if (selected && (~gc->flags & GRID_FLAG_SELECTED)) {
 		memcpy(&tmp_gc, gc, sizeof tmp_gc);

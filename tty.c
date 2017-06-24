@@ -159,8 +159,10 @@ tty_read_callback(__unused int fd, __unused short events, void *data)
 	int		 nread;
 
 	nread = evbuffer_read(tty->in, tty->fd, -1);
-	if (nread == -1)
+	if (nread == -1) {
+		event_del(&tty->event_in);
 		return;
+	}
 	log_debug("%s: read %d bytes (already %zu)", c->name, nread, size);
 
 	while (tty_keys_next(tty))
@@ -1848,7 +1850,7 @@ tty_check_fg(struct tty *tty, const struct window_pane *wp,
 	 */
 	if (~gc->flags & GRID_FLAG_NOPALETTE) {
 		c = gc->fg;
-		if (gc->fg < 8 && gc->attr & GRID_ATTR_BRIGHT)
+		if (c < 8 && gc->attr & GRID_ATTR_BRIGHT)
 			c += 90;
 		if ((c = window_pane_get_palette(wp, c)) != -1)
 			gc->fg = c;

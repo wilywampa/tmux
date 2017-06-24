@@ -45,7 +45,7 @@ struct tmuxpeer {
 #define PEER_BAD 0x1
 
 	void		(*dispatchcb)(struct imsg *, void *);
-	void		*arg;
+	void		 *arg;
 };
 
 static int	peer_check_version(struct tmuxpeer *, struct imsg *);
@@ -262,4 +262,10 @@ void
 proc_kill_peer(struct tmuxpeer *peer)
 {
 	peer->flags |= PEER_BAD;
+}
+
+void
+proc_toggle_log(struct tmuxproc *tp)
+{
+	log_toggle(tp->name);
 }
